@@ -53,6 +53,10 @@ Administrator ──HTTP browser──▶ /                  (admin UX)
   letting the administrator add, edit, or remove them. Backed by a
   small JSON API at `/api/domains`.
 
+> **Deploying on Ubuntu Server?** See [`INSTALL.md`](INSTALL.md) for a
+> step-by-step guide (system user, systemd, Nginx + TLS, firewall,
+> backups, troubleshooting).
+
 ## Quick start
 
 ### 1. Install
