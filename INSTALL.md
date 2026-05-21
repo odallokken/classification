@@ -22,7 +22,6 @@ You will need to know:
 |---|---|---|
 | **Hostname / IP of this Ubuntu server** | Where Pexip will send policy requests. | `policy.example.com` or `10.0.0.50` |
 | **Pexip Conferencing Node hostname** | Any one of your Pexip nodes. The Client API is reachable on every node. | `conf01.example.com` |
-| **Host PIN of the meetings (if any)** | Used by the policy server when it joins as a bot. Leave blank if your meetings don't have a host PIN. | `1234` |
 | **Default classification level** | Used when a caller's domain is not in the table yet. | `0` |
 
 Write these down — you'll paste them into a config file in step 5.
@@ -153,10 +152,12 @@ DEFAULT_CLASSIFICATION_LEVEL=0
 # Hostname of any one of your Pexip Conferencing Nodes.
 PEXIP_NODE=conf01.example.com
 
-# Host PIN, if your meetings have one. Leave blank otherwise.
-PEXIP_HOST_PIN=
-
 # Display name shown in the participant list when the policy server joins.
+# The bot stays in every meeting (refreshing its token automatically) so
+# the classification banner and elapsed timer remain set for the whole
+# conference. Host PINs are not configured here — the bot joins without a
+# PIN, which works for unprotected meetings and PIN-protected meetings
+# that allow guests.
 PEXIP_PS_DISPLAY_NAME=Policy Server
 
 # Set to false ONLY if your Pexip nodes use a self-signed certificate
@@ -177,7 +178,7 @@ sudo chmod 640 /etc/pexip-policy.env
 ```
 
 Edit the file with `sudo nano /etc/pexip-policy.env` and replace
-`conf01.example.com` and the PIN (if any) with your real values.
+`conf01.example.com` with your real value.
 
 ---
 
@@ -524,7 +525,7 @@ sudo systemctl start   pexip-policy
 | `curl https://policy.example.com/healthz` times out | Firewall or DNS | Check `sudo ufw status`, verify the FQDN resolves to this server. |
 | `502 Bad Gateway` from Nginx | Gunicorn isn't running | `sudo systemctl status pexip-policy`, then `sudo journalctl -u pexip-policy -n 100`. |
 | Pexip logs show `404 Neither conference nor gateway found` after a call | Policy response was rejected (commonly an invalid `view` value or a PIN/`allow_guests` mismatch) | Tail the policy server logs and the Pexip support log; see gotchas in the `pexip-policy-server` skill. |
-| Classification banner never appears | `PEXIP_NODE` wrong, host PIN missing/mismatched, or classification level not defined on Pexip | Verify `PEXIP_NODE` resolves and 443 is reachable; check the level is configured in Pexip's classification scheme. |
+| Classification banner never appears | `PEXIP_NODE` wrong, or classification level not defined on Pexip | Verify `PEXIP_NODE` resolves and 443 is reachable; check the level is configured in Pexip's classification scheme. |
 | Elapsed timer never appears | Same as above — the Client API call failed | Look for `set_clock (elapsed) failed` in `journalctl -u pexip-policy`. |
 | `Policy Server` participant stays in the roster | A token/refresh edge case. Ending the meeting cleans it up. | Investigate by raising the log level (set `LOG_LEVEL=DEBUG` in `/etc/pexip-policy.env`, then `sudo systemctl restart pexip-policy`). |
 | `PEXIP_VERIFY_TLS` warnings about self-signed certs | Lab Pexip nodes often use self-signed certs | Set `PEXIP_VERIFY_TLS=false` in `/etc/pexip-policy.env` for lab use only — never in production. |
