@@ -185,8 +185,6 @@ class PexipClientAPI:
         All exceptions are caught and logged so a Client API outage cannot
         break the policy server's response path.
         """
-        token: Optional[str] = None
-        expires = _DEFAULT_TOKEN_EXPIRES
         try:
             token, expires = self.request_token(conference_alias)
         except Exception as exc:  # noqa: BLE001
@@ -237,7 +235,9 @@ class PexipClientAPI:
             conference_alias,
         )
         while True:
-            interval = max(15, min(expires - _REFRESH_SAFETY_MARGIN, expires // 2 or 30))
+            # Refresh well before the advertised expiry, but never sleep
+            # for less than 15s to avoid hammering the node.
+            interval = max(15, min(expires // 2, expires - _REFRESH_SAFETY_MARGIN))
             if stop_event is not None and stop_event.wait(interval):
                 log.info("Stop requested; leaving %s", conference_alias)
                 return
