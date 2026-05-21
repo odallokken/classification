@@ -15,8 +15,12 @@ meeting for its full duration. The loop exits — releasing the token — when
 the Pexip node reports the conference has ended (refresh failure).
 
 Host PINs are intentionally **not** sent. PINs are dynamic per meeting and
-cannot be configured server-wide; the bot joins without a PIN, which works
-for unprotected meetings and for PIN-protected meetings that allow guests.
+cannot be configured server-wide. Instead, the policy server's
+``participant_properties`` endpoint detects the bot (by display name) and
+returns ``role: "chair"`` + ``bypass_lock: true``, so Pexip elevates the
+bot to **host** as soon as it joins — regardless of any PIN configuration
+on the meeting. This is required because applying classification levels
+via the Client API needs host privileges.
 
 Errors are logged but never raised back to the policy request — Pexip must
 always receive its policy response on time.
@@ -92,10 +96,13 @@ class PexipClientAPI:
         """Request a token. Returns ``(token, expires_seconds)``.
 
         No PIN header is sent. PINs are dynamic per meeting and cannot be
-        configured server-wide, so the bot always joins as a non-PIN
-        participant; Pexip will admit it as a guest when a host PIN is set
-        but guests are allowed, or as a host when the conference has no PIN
-        at all. If the meeting requires a PIN that we don't have, the call
+        configured server-wide. The bot is elevated to **host** by the
+        policy server's ``participant_properties`` callback, which
+        recognises the bot by display name and returns
+        ``role: "chair"`` + ``bypass_lock: true``. That makes the bot a
+        host as soon as it joins, regardless of the meeting's PIN
+        configuration, so it can call ``set_classification_level``. If
+        the meeting requires a guest PIN that we don't have, the call
         will fail and the caller logs and moves on.
         """
         url = f"{self._base(conference_alias)}/request_token"

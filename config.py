@@ -40,8 +40,10 @@ class Settings:
 
     # Pexip Client API settings (required to apply classification + timer).
     # Note: host PINs are intentionally not configured here. PINs are
-    # dynamic per meeting and the bot joins without one — Pexip admits it
-    # as a guest when a host PIN is set but guests are allowed.
+    # dynamic per meeting; instead the policy server's
+    # participant_properties callback elevates the bot to host (chair +
+    # bypass_lock) by matching this display name against the
+    # participant's remote_alias.
     pexip_node: str = os.environ.get("PEXIP_NODE", "")  # e.g. "conf.example.com"
     pexip_display_name: str = os.environ.get(
         "PEXIP_PS_DISPLAY_NAME", "Policy Server"
