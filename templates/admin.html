@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Pexip Policy Server — Domain Classification</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <main>
+    <h1>Domain → Classification Mapping</h1>
+    <p class="muted">
+      Each row maps an incoming caller domain to a classification level.
+      When a call arrives, the policy server inspects the caller's
+      <code>remote_alias</code> (e.g. <code>sip:alice@example.com</code>),
+      looks up the domain (<code>example.com</code>) here, and applies
+      that classification level to the meeting via the Pexip Client API.
+      An elapsed-time conference timer is added to every meeting.
+    </p>
+    <p class="muted">
+      Unknown domains use the default level
+      <strong>L{{ default_level }}</strong>.
+    </p>
+
+    <table id="mappings">
+      <thead>
+        <tr>
+          <th>Domain</th>
+          <th>Level</th>
+          <th>Label</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for domain, level, label in mappings %}
+        <tr data-domain="{{ domain }}">
+          <td>{{ domain }}</td>
+          <td>L{{ level }}</td>
+          <td>{{ label or "" }}</td>
+          <td>
+            <button class="delete" data-domain="{{ domain }}">Delete</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr id="empty-row">
+          <td colspan="4" class="muted">No mappings yet — add one below.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <h2>Add or update a mapping</h2>
+    <form id="add-form">
+      <label>
+        Domain
+        <input type="text" name="domain" placeholder="example.com" required>
+      </label>
+      <label>
+        Classification level
+        <input type="number" name="classification_level" min="0" value="0" required>
+      </label>
+      <label>
+        Label (optional)
+        <input type="text" name="label" placeholder="Official">
+      </label>
+      <button type="submit">Save</button>
+    </form>
+    <p id="status" role="status"></p>
+  </main>
+
+  <script>
+    const status = document.getElementById('status');
+
+    function showStatus(msg, isError) {
+      status.textContent = msg;
+      status.className = isError ? 'error' : 'ok';
+      setTimeout(() => { status.textContent = ''; status.className = ''; }, 3000);
+    }
+
+    document.getElementById('add-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const form = ev.target;
+      const body = {
+        domain: form.domain.value.trim().toLowerCase(),
+        classification_level: parseInt(form.classification_level.value, 10),
+        label: form.label.value.trim() || null,
+      };
+      const resp = await fetch('/api/domains', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({error: 'Save failed'}));
+        showStatus(err.error || 'Save failed', true);
+        return;
+      }
+      window.location.reload();
+    });
+
+    document.querySelectorAll('button.delete').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const domain = btn.dataset.domain;
+        if (!confirm(`Delete mapping for ${domain}?`)) return;
+        const resp = await fetch('/api/domains/' + encodeURIComponent(domain), {
+          method: 'DELETE',
+        });
+        if (resp.status === 204) {
+          window.location.reload();
+        } else {
+          showStatus('Delete failed', true);
+        }
+      });
+    });
+  </script>
+</body>
+</html>
