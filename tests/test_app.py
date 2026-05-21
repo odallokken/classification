@@ -228,6 +228,53 @@ def test_participant_properties_triggers_client_api_once(monkeypatch, client, ap
     assert calls == [("tsmeet", 4)], calls
 
 
+def test_participant_properties_elevates_policy_server_bot_to_host(client):
+    # Register the conference first so participant_properties is happy.
+    client.post(
+        "/policy/v1/service/configuration",
+        json={
+            "local_alias": "sip:hostmeet@conf.example.com",
+            "remote_alias": "sip:alice@example.com",
+        },
+    )
+
+    # The bot joins via the Client API with display_name "Policy Server",
+    # which Pexip surfaces as the participant's remote_alias on the
+    # policy callback.
+    resp = client.post(
+        "/policy/v1/participant/properties",
+        json={
+            "service_name": "hostmeet",
+            "remote_alias": "Policy Server",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["status"] == "success"
+    assert body["action"] == "continue"
+    # Must always be host, regardless of meeting PIN/lock state, so the
+    # bot can call set_classification_level via the Client API.
+    assert body["result"] == {"role": "chair", "bypass_lock": True}
+
+
+def test_participant_properties_bot_match_is_case_insensitive(client):
+    client.post(
+        "/policy/v1/service/configuration",
+        json={
+            "local_alias": "sip:hostmeet2@conf.example.com",
+            "remote_alias": "sip:alice@example.com",
+        },
+    )
+    resp = client.post(
+        "/policy/v1/participant/properties",
+        json={
+            "service_name": "hostmeet2",
+            "remote_display_name": "policy server",
+        },
+    )
+    assert resp.get_json()["result"] == {"role": "chair", "bypass_lock": True}
+
+
 def test_healthz(client):
     resp = client.get("/healthz")
     assert resp.status_code == 200

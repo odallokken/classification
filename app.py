@@ -116,6 +116,26 @@ def _normalize_view(view: Optional[str]) -> str:
     return _DEFAULT_VIEW
 
 
+def _is_policy_server_participant(params: dict) -> bool:
+    """Return True if the participant in ``params`` is this server's bot.
+
+    The Policy Server bot joins via the Client API with ``display_name``
+    set to ``settings.pexip_display_name`` (default ``"Policy Server"``).
+    Pexip populates ``remote_alias`` and ``remote_display_name`` on the
+    policy callback from that field for participants that have no
+    SIP/H.323 URI, so matching either against the configured display
+    name is sufficient.
+    """
+    expected = (settings.pexip_display_name or "").strip().lower()
+    if not expected:
+        return False
+    for key in ("remote_alias", "remote_display_name", "display_name"):
+        value = params.get(key)
+        if value and str(value).strip().lower() == expected:
+            return True
+    return False
+
+
 def _request_payload() -> dict:
     """Return the request body as a dict whether sent as JSON, form, or query.
 
@@ -205,8 +225,27 @@ def create_app(client_api: Optional[PexipClientAPI] = None) -> Flask:
         if local_alias:
             _maybe_apply_client_api_actions(app, local_alias)
 
-        # Empty result tells Pexip "use defaults" — we deliberately do not
-        # override the participant role here.
+        # Always elevate the Policy Server bot to host (chair) so it can
+        # call ``set_classification_level`` regardless of whether the
+        # meeting has a host PIN, allows guests, or is locked. Detected
+        # by matching the participant's ``remote_alias`` against the
+        # configured Policy Server display name (Pexip populates
+        # ``remote_alias`` from the Client API ``display_name`` for
+        # participants that have no SIP/H.323 URI). This is the
+        # canonical pattern documented in the ``pexip-policy-server``
+        # skill (SS2 Role Assignment Ladder, gotcha #12) and must be
+        # checked **before** any other role logic.
+        if _is_policy_server_participant(params):
+            return jsonify(
+                {
+                    "status": "success",
+                    "action": "continue",
+                    "result": {"role": "chair", "bypass_lock": True},
+                }
+            )
+
+        # Empty result tells Pexip "use defaults" — we deliberately do
+        # not override roles for real participants here.
         return jsonify({"status": "success", "action": "continue", "result": {}})
 
     # --------------------------------------------------------- admin UX
