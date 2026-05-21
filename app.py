@@ -147,7 +147,6 @@ def create_app(client_api: Optional[PexipClientAPI] = None) -> Flask:
         client_api = PexipClientAPI(
             node=settings.pexip_node,
             display_name=settings.pexip_display_name,
-            pin=settings.pexip_pin,
             verify_tls=settings.pexip_verify_tls,
             timeout=settings.pexip_request_timeout,
         )
@@ -272,12 +271,14 @@ def create_app(client_api: Optional[PexipClientAPI] = None) -> Flask:
 
 
 def _maybe_apply_client_api_actions(app: Flask, conference_alias: str) -> None:
-    """Fire ``set_classification_level`` + elapsed ``set_clock`` once per VMR.
+    """Fire ``set_classification_level`` + elapsed ``set_clock`` once per VMR
+    and keep the Policy Server bot in the meeting until it ends.
 
     Uses the ``conference_state`` table as a cross-process atomic gate so
     multiple Gunicorn workers cannot race and produce duplicate Policy
     Server participants (gotchas #8 and #9 in the ``pexip-policy-server``
-    skill). Runs in a daemon thread so the policy response is not delayed.
+    skill). Runs in a daemon thread so the policy response is not delayed
+    and so the keep-alive loop can outlive a single Flask request.
     """
     state = storage.get_conference_state(settings.database_path, conference_alias)
     if state is None:

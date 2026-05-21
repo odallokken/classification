@@ -11,9 +11,10 @@ Server** that does two things:
 2. **Adds an elapsed-time conference timer to every meeting.**
    Because conference timers can only be set through the
    [Pexip Client API](https://docs.pexip.com/api_client/api_rest.htm),
-   the policy server briefly joins as a "Policy Server" participant via
-   the Client API and calls `set_clock` with `type: "elapsed"` after the
-   meeting starts.
+   the policy server joins as a "Policy Server" participant via the
+   Client API, calls `set_clock` with `type: "elapsed"` after the meeting
+   starts, and then **stays in the meeting** (refreshing its token in the
+   background) until the conference ends.
 
 It also ships a tiny admin UX (a single HTML page) so an administrator
 can manage `domain → classification level` mappings with no command-line
@@ -35,6 +36,7 @@ Pexip Infinity ──POST /policy/v1/participant/properties─▶ this server
                                                   (request_token,
                                                    set_classification_level,
                                                    set_clock {type:"elapsed"},
+                                                   refresh_token …,
                                                    release_token)
 
 Administrator ──HTTP browser──▶ /                  (admin UX)
@@ -45,10 +47,11 @@ Administrator ──HTTP browser──▶ /                  (admin UX)
   The resolved level is stored in SQLite under the meeting's alias.
 * **`participant_properties`** — first time it's called for a given
   meeting, it spawns a daemon thread that uses the Pexip Client API to
-  set the classification level and add the elapsed timer, then releases
-  the token. The cross-process atomic gate (a `UNIQUE` constraint in
-  SQLite) prevents duplicate Policy Server participants when multiple
-  workers are running.
+  set the classification level, add the elapsed timer, and then keep
+  the Policy Server bot in the meeting (via periodic `refresh_token`)
+  until the conference ends. The cross-process atomic gate (a `UNIQUE`
+  constraint in SQLite) prevents duplicate Policy Server participants
+  when multiple workers are running.
 * **Admin UX** — `GET /` renders an HTML page listing all mappings and
   letting the administrator add, edit, or remove them. Backed by a
   small JSON API at `/api/domains`.
@@ -74,7 +77,6 @@ All configuration is via environment variables:
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `PEXIP_NODE` | yes (for prod) | _empty_ | Hostname of a Pexip Conferencing Node, e.g. `conf.example.com`. If empty, the Client API side-effects are skipped (server still classifies). |
-| `PEXIP_HOST_PIN` | no | _empty_ | Host PIN if the conference requires one. |
 | `PEXIP_PS_DISPLAY_NAME` | no | `Policy Server` | Display name used by the bot participant. |
 | `PEXIP_VERIFY_TLS` | no | `true` | Verify TLS cert of the Pexip node. |
 | `PEXIP_HTTP_TIMEOUT` | no | `10` | Client API HTTP timeout (seconds). |

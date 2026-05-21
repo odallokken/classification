@@ -38,12 +38,14 @@ class Settings:
     # Default classification level when a caller's domain has no mapping.
     default_classification_level: int = _env_int("DEFAULT_CLASSIFICATION_LEVEL", 0)
 
-    # Pexip Client API settings (required to apply classification + timer)
+    # Pexip Client API settings (required to apply classification + timer).
+    # Note: host PINs are intentionally not configured here. PINs are
+    # dynamic per meeting and the bot joins without one — Pexip admits it
+    # as a guest when a host PIN is set but guests are allowed.
     pexip_node: str = os.environ.get("PEXIP_NODE", "")  # e.g. "conf.example.com"
     pexip_display_name: str = os.environ.get(
         "PEXIP_PS_DISPLAY_NAME", "Policy Server"
     )
-    pexip_pin: str = os.environ.get("PEXIP_HOST_PIN", "")
     pexip_verify_tls: bool = _env_bool("PEXIP_VERIFY_TLS", True)
     pexip_request_timeout: int = _env_int("PEXIP_HTTP_TIMEOUT", 10)
 
