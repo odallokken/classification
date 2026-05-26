@@ -1,0 +1,13 @@
+{
+    "theme_version": 2,
+    "classification": {
+        "levels": {
+            "1": {"text": "Official",           "color": "0xff000000", "bgcolor": "0xff7ed957"},
+            "2": {"text": "Official Sensitive", "color": "0xff000000", "bgcolor": "0xffffde59"},
+            "3": {"text": "Restricted",         "color": "0xffffffff", "bgcolor": "0xffff914d"},
+            "4": {"text": "Confidential",       "color": "0xffffffff", "bgcolor": "0xffd62828"},
+            "5": {"text": "Secret",             "color": "0xffffffff", "bgcolor": "0xff1d1d1d"}
+        },
+        "default": 1
+    }
+}

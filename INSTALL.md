@@ -425,7 +425,16 @@ In the Pexip Management Node admin UI:
 
 Make sure the **Classification levels** scheme on Pexip already defines
 the integer levels `1`–`5` that this policy server uses — otherwise
-`set_classification_level` will be rejected by the Client API.
+`set_classification_level` will be rejected by the Client API. Those
+levels are defined in the **theme** applied to the conference (the
+`classification.levels` object inside `themeconfig.json`). A ready-to-use
+example bundled with this repo is
+[`examples/themeconfig.json`](examples/themeconfig.json) — zip it (so
+`themeconfig.json` is at the top of the archive) and upload it via
+**Services → Themes → Add theme**, then apply that theme to the relevant
+VMRs / Call Routing Rules (or make it the global default theme). See the
+[README "Pexip theme (classification banner)" section](README.md#pexip-theme-classification-banner)
+for the full mapping and field reference.
 
 > **How the meeting's level evolves.** The classification stored at
 > meeting creation is determined by the first caller's domain. As
