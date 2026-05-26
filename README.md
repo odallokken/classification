@@ -148,6 +148,76 @@ issue policy lookups as `GET` with query parameters.
   meeting's classification to their level; a more-trusted participant
   never raises it.
 
+## Pexip theme (classification banner)
+
+The classification banner shown to participants is rendered by Pexip
+Infinity from a **theme** that you upload via the Pexip Management Node
+(**Services → Themes**). A Pexip theme is a ZIP bundle whose
+configuration file is `themeconfig.json` (sometimes referred to as
+`theme.json`). Pexip will only display a banner for a numeric level that
+is defined in the active theme's `classification.levels` map — so the
+theme **must** define exactly the same set of integer levels that this
+policy server emits (**1**–**5**).
+
+If a level returned by the policy server is missing from the theme, the
+Client API call `set_classification_level` is rejected and no banner
+appears on the conference.
+
+### Required alignment with the policy server
+
+| Theme field | Must match | Notes |
+|---|---|---|
+| `classification.levels` keys | The integer range **`"1"`–`"5"`** | Same range enforced by `storage.MIN_CLASSIFICATION_LEVEL` / `MAX_CLASSIFICATION_LEVEL` and validated by the admin API. |
+| `classification.levels[N].text` | The label you show admins in `/` | The strings here are what end users see on the banner. They don't have to be identical to the `label` column in the mappings table, but keeping them aligned avoids confusion. |
+| `classification.default` | `DEFAULT_CLASSIFICATION_LEVEL` (default `1`) | Pexip uses this until the policy server pushes a level via the Client API; aligning the two means an unknown-domain meeting looks the same before and after the bot acts. |
+
+### Example `themeconfig.json`
+
+A minimal, working example that covers all five levels this server uses
+is shipped at [`examples/themeconfig.json`](examples/themeconfig.json):
+
+```json
+{
+    "theme_version": 2,
+    "classification": {
+        "levels": {
+            "1": {"text": "Official",           "color": "0xff000000", "bgcolor": "0xff7ed957"},
+            "2": {"text": "Official Sensitive", "color": "0xff000000", "bgcolor": "0xffffde59"},
+            "3": {"text": "Restricted",         "color": "0xffffffff", "bgcolor": "0xffff914d"},
+            "4": {"text": "Confidential",       "color": "0xffffffff", "bgcolor": "0xffd62828"},
+            "5": {"text": "Secret",             "color": "0xffffffff", "bgcolor": "0xff1d1d1d"}
+        },
+        "default": 1
+    }
+}
+```
+
+Notes on the format (see Pexip's
+[Customizing conference images and voice prompts using themes](https://docs.pexip.com/admin/themes_file_requirements.htm)
+for the full reference):
+
+* `theme_version: 2` is required for any modern (non-legacy) theme.
+* `classification.levels` keys are numeric strings (`"1"`, not `1`).
+* `text` is the string painted onto the banner.
+* `color` / `bgcolor` are optional ARGB hex values
+  (`0xAARRGGBB`); omit them to use Pexip's defaults.
+* `classification.default` must be a key that exists in `levels`.
+
+### Uploading the theme
+
+1. Zip the file (and any other theme assets) so that `themeconfig.json`
+   sits at the **top level** of the archive — e.g.
+   `zip classification-theme.zip themeconfig.json`.
+2. In the Pexip Management Node, go to **Services → Themes → Add theme**,
+   upload the ZIP, and give it a name (for example `Classification`).
+3. Apply the theme to the relevant Virtual Meeting Rooms / Virtual
+   Auditoriums / Call Routing Rules (or set it as the global default
+   theme) so that conferences created via this policy server use it.
+
+Once the theme is in place, the policy server's
+`set_classification_level` calls will paint the matching banner on
+every conference.
+
 ## Development
 
 ```bash
