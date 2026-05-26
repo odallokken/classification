@@ -76,55 +76,22 @@ Administrator ──HTTP browser──▶ /                  (admin UX)
   most permissive level and `5` is the highest / most restrictive.
   Backed by a small JSON API at `/api/domains`.
 
-> **Deploying on Ubuntu Server?** See [`INSTALL.md`](INSTALL.md) for a
-> step-by-step guide (system user, systemd, Nginx + TLS, firewall,
-> backups, troubleshooting).
-
 ## Installation
 
-The steps below get the policy server running on a single host using a
-Python virtual environment and Gunicorn. For a full production
-deployment on Ubuntu Server (dedicated service user, systemd, Nginx with
-TLS, firewall rules, backups and troubleshooting), follow
-[`INSTALL.md`](INSTALL.md) instead — this section gives you the same
-runtime, just without the OS-level hardening.
+All installation, configuration and day-2 operations instructions live
+in [`INSTALL.md`](INSTALL.md). It is a step-by-step guide for deploying
+the policy server on Ubuntu Server (dedicated service user, systemd,
+Nginx + TLS, firewall, backups, upgrades and troubleshooting).
 
-### Prerequisites
+The rest of this document describes **what** the server does and
+**how** it behaves at runtime — refer to it alongside `INSTALL.md` when
+you're configuring or operating the service.
 
-* **Python 3.10 or newer** (`python3 --version`).
-* **`pip`** and **`venv`** (Debian/Ubuntu: `sudo apt install python3-pip python3-venv`).
-* Network reachability between this host and at least one Pexip
-  Conferencing Node (outbound TCP/443 to the node, inbound TCP/8080 —
-  or whatever port you bind Gunicorn to — from the nodes).
-* On Pexip Infinity, a **classification scheme** that already defines
-  the integer levels `1`–`5`. The policy server will not create
-  classification levels on Pexip; it can only select between levels
-  that already exist there.
+## Configuration reference
 
-### 1. Get the code
-
-```bash
-git clone https://github.com/odallokken/classification.git
-cd classification
-```
-
-### 2. Create a virtual environment and install dependencies
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt gunicorn
-```
-
-`gunicorn` is the production WSGI server you'll run the Flask app under.
-
-### 3. Configure
-
-All configuration is via environment variables. The table below lists
-every variable the server understands; you can either `export` them
-before starting Gunicorn or put them in a file and load it (e.g.
-`set -a; . ./pexip-policy.env; set +a`).
+All configuration is via environment variables. `INSTALL.md` shows how
+to put these into a config file that systemd loads; the table below is
+the authoritative reference for what each variable does.
 
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
@@ -136,86 +103,10 @@ before starting Gunicorn or put them in a file and load it (e.g.
 | `POLICY_DB_PATH` | no | `./policy.db` | SQLite database location. Put this outside the source tree on a long-lived host so upgrades never touch it (e.g. `/var/lib/pexip-policy/policy.db`). |
 | `ENABLE_CLIENT_API` | no | `true` | Master switch for Client API calls. Leave `true` in production. |
 
-Minimal example:
-
-```bash
-export PEXIP_NODE=conf01.example.com
-export POLICY_DB_PATH=/var/lib/pexip-policy/policy.db
-export DEFAULT_CLASSIFICATION_LEVEL=1
-```
-
-Make sure the database directory exists and is writable by the user
-that will run Gunicorn:
-
-```bash
-sudo mkdir -p /var/lib/pexip-policy
-sudo chown "$USER":"$USER" /var/lib/pexip-policy
-```
-
-### 4. Run
-
-```bash
-gunicorn -w 4 -b 0.0.0.0:8080 app:app
-```
-
-The server is now listening on port 8080. On first start it creates the
-SQLite schema automatically.
-
-Quick smoke test from a second shell:
-
-```bash
-curl -s http://127.0.0.1:8080/healthz
-# -> {"status":"ok"}
-```
-
-### 5. Add the first domain mapping
-
-Open `http://<this-host>:8080/` in a browser. You'll see the empty
-mappings table. Add one entry, for example:
-
-| Domain | Classification level | Label |
-|---|---|---|
-| `example.com` | `1` | `Official` |
-
-Click **Save**. The row appears in the table immediately.
-
 > The admin UX has no built-in authentication. If the server is
 > reachable from anywhere except `localhost`, terminate it behind a
 > reverse proxy that adds authentication on `/` and `/api/domains` —
-> see [`INSTALL.md`](INSTALL.md) for a worked Nginx + Basic Auth
-> example.
-
-### 6. Point Pexip at it
-
-In the Pexip admin UI:
-
-1. **Platform → External policy** (or **Policy profiles**, depending on
-   version) → set the Service URL to
-   `https://<this-server>:8080/policy/v1`.
-   (Pexip appends `/service/configuration` and `/participant/properties`
-   itself.)
-2. Tick **Use external policy** on the relevant Conferencing Node /
-   System location.
-3. Confirm the Conferencing Node's classification scheme already
-   contains the levels `1`–`5` you intend to map domains to; otherwise
-   `set_classification_level` will be rejected by the Client API.
-
-### Upgrading
-
-Stop the server, pull the latest code, refresh dependencies, start
-again:
-
-```bash
-git pull --ff-only
-source .venv/bin/activate
-pip install -r requirements.txt
-# restart gunicorn (Ctrl-C the foreground process, or use systemd as
-# described in INSTALL.md)
-```
-
-The mappings and per-conference state live in the SQLite database
-pointed at by `POLICY_DB_PATH`, so as long as that file is preserved
-upgrades carry your configuration forward automatically.
+> `INSTALL.md` includes a worked Nginx + Basic Auth example.
 
 ## Endpoints
 
