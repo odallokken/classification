@@ -22,7 +22,7 @@ def app(monkeypatch):
     monkeypatch.setenv("POLICY_DB_PATH", tmp.name)
     monkeypatch.setenv("ENABLE_CLIENT_API", "false")
     monkeypatch.setenv("PEXIP_NODE", "")
-    monkeypatch.setenv("DEFAULT_CLASSIFICATION_LEVEL", "0")
+    monkeypatch.setenv("DEFAULT_CLASSIFICATION_LEVEL", "1")
 
     # Reload modules so they pick up the new environment.
     import importlib
@@ -144,7 +144,7 @@ def test_service_configuration_unknown_domain_uses_default(client):
     )
     assert resp.status_code == 200
     result = resp.get_json()["result"]
-    assert result["service_tag"] == "classification-l0"
+    assert result["service_tag"] == "classification-l1"
 
 
 def test_service_configuration_parent_domain_match(client):
@@ -273,6 +273,191 @@ def test_participant_properties_bot_match_is_case_insensitive(client):
         },
     )
     assert resp.get_json()["result"] == {"role": "chair", "bypass_lock": True}
+
+
+def test_admin_api_rejects_levels_outside_one_to_five(client):
+    # Below the allowed range.
+    resp = client.post(
+        "/api/domains",
+        json={"domain": "low.example.com", "classification_level": 0},
+    )
+    assert resp.status_code == 400
+    assert "between 1 and 5" in resp.get_json()["error"]
+
+    # Above the allowed range.
+    resp = client.post(
+        "/api/domains",
+        json={"domain": "high.example.com", "classification_level": 6},
+    )
+    assert resp.status_code == 400
+    assert "between 1 and 5" in resp.get_json()["error"]
+
+    # Boundary values are accepted.
+    for lvl in (1, 5):
+        resp = client.post(
+            "/api/domains",
+            json={
+                "domain": f"ok{lvl}.example.com",
+                "classification_level": lvl,
+            },
+        )
+        assert resp.status_code == 201, resp.get_json()
+
+
+def test_second_participant_lowers_meeting_classification(client, app):
+    # Two mapped domains: trusted (L4) and untrusted (L2).
+    client.post(
+        "/api/domains",
+        json={"domain": "trusted.example.com", "classification_level": 4,
+              "label": "Secret"},
+    )
+    client.post(
+        "/api/domains",
+        json={"domain": "guest.example.com", "classification_level": 2,
+              "label": "Official"},
+    )
+
+    # Stub the Client API so we can verify update_classification_level gets
+    # called when the lower-level participant joins. Also simulate that the
+    # bot already holds a live token by populating _tokens directly.
+    update_calls: list = []
+    apply_calls: list = []
+
+    class StubClient:
+        def __init__(self):
+            # Mirror the real PexipClientAPI surface used by app.py.
+            self._tokens = {}
+
+        def apply_classification_and_timer(self, alias, level):
+            apply_calls.append((alias, level))
+            # Simulate the bot having a live token after joining.
+            self._tokens[alias] = "live-token"
+
+        def update_classification_level(self, alias, level):
+            update_calls.append((alias, level))
+            return True
+
+    app.config["CLIENT_API"] = StubClient()
+
+    # Meeting is created by the trusted caller — initial level L4.
+    resp = client.post(
+        "/policy/v1/service/configuration",
+        json={
+            "local_alias": "sip:mixmeet@conf.example.com",
+            "remote_alias": "sip:alice@trusted.example.com",
+        },
+    )
+    assert resp.get_json()["result"]["service_tag"] == "classification-l4"
+
+    # First participant (trusted): triggers the Client API apply path.
+    client.post(
+        "/policy/v1/participant/properties",
+        json={
+            "service_name": "mixmeet",
+            "remote_alias": "sip:alice@trusted.example.com",
+        },
+    )
+
+    import time
+
+    for _ in range(20):
+        if apply_calls:
+            break
+        time.sleep(0.05)
+    assert apply_calls == [("mixmeet", 4)]
+
+    # Second participant from a lower-classification domain joins. The
+    # meeting's effective level should drop from L4 to L2 and the policy
+    # server should push the new level via the Client API.
+    client.post(
+        "/policy/v1/participant/properties",
+        json={
+            "service_name": "mixmeet",
+            "remote_alias": "sip:eve@guest.example.com",
+        },
+    )
+
+    for _ in range(20):
+        if update_calls:
+            break
+        time.sleep(0.05)
+    assert update_calls == [("mixmeet", 2)]
+
+    # The stored conference level reflects the lowered classification.
+    import storage as storage_module
+    from config import settings as live_settings
+
+    level, _ = storage_module.get_conference_state(
+        live_settings.database_path, "mixmeet"
+    )
+    assert level == 2
+
+
+def test_higher_classification_participant_does_not_raise_meeting_level(
+    client, app
+):
+    client.post(
+        "/api/domains",
+        json={"domain": "trusted.example.com", "classification_level": 4},
+    )
+    client.post(
+        "/api/domains",
+        json={"domain": "supertrusted.example.com", "classification_level": 5},
+    )
+
+    update_calls: list = []
+
+    class StubClient:
+        def __init__(self):
+            self._tokens = {"raisemeet": "live-token"}
+
+        def apply_classification_and_timer(self, alias, level):
+            pass
+
+        def update_classification_level(self, alias, level):
+            update_calls.append((alias, level))
+            return True
+
+    app.config["CLIENT_API"] = StubClient()
+
+    # Meeting starts at L4.
+    client.post(
+        "/policy/v1/service/configuration",
+        json={
+            "local_alias": "sip:raisemeet@conf.example.com",
+            "remote_alias": "sip:alice@trusted.example.com",
+        },
+    )
+    client.post(
+        "/policy/v1/participant/properties",
+        json={
+            "service_name": "raisemeet",
+            "remote_alias": "sip:alice@trusted.example.com",
+        },
+    )
+
+    # A more-trusted (higher-level) participant joins — the meeting's
+    # classification must NOT silently rise.
+    client.post(
+        "/policy/v1/participant/properties",
+        json={
+            "service_name": "raisemeet",
+            "remote_alias": "sip:vip@supertrusted.example.com",
+        },
+    )
+
+    import time
+    time.sleep(0.15)
+
+    assert update_calls == []
+
+    import storage as storage_module
+    from config import settings as live_settings
+
+    level, _ = storage_module.get_conference_state(
+        live_settings.database_path, "raisemeet"
+    )
+    assert level == 4
 
 
 def test_healthz(client):

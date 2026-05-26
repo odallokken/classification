@@ -7,7 +7,13 @@ Server** that does two things:
    When Pexip routes a new call, this server inspects the caller's
    `remote_alias` (e.g. `sip:alice@example.com`), looks up the domain
    (`example.com`) in an administrator-managed table, and returns a
-   classification level for the meeting.
+   classification level (an integer in the range **1–5**, where `1` is
+   the lowest / most permissive level and `5` is the highest / most
+   restrictive) for the meeting. As additional participants join, the
+   meeting's classification is re-evaluated and set to the **lowest**
+   level across every joined participant's domain — so admitting a
+   less-trusted party declassifies the meeting to their level rather
+   than silently raising it.
 2. **Adds an elapsed-time conference timer to every meeting.**
    Because conference timers can only be set through the
    [Pexip Client API](https://docs.pexip.com/api_client/api_rest.htm),
@@ -80,7 +86,7 @@ All configuration is via environment variables:
 | `PEXIP_PS_DISPLAY_NAME` | no | `Policy Server` | Display name used by the bot participant. |
 | `PEXIP_VERIFY_TLS` | no | `true` | Verify TLS cert of the Pexip node. |
 | `PEXIP_HTTP_TIMEOUT` | no | `10` | Client API HTTP timeout (seconds). |
-| `DEFAULT_CLASSIFICATION_LEVEL` | no | `0` | Level used when the caller's domain has no mapping. |
+| `DEFAULT_CLASSIFICATION_LEVEL` | no | `1` | Level used when the caller's domain has no mapping. Must be in the range 1..5. |
 | `POLICY_DB_PATH` | no | `./policy.db` | SQLite database location. |
 | `ENABLE_CLIENT_API` | no | `true` | Set to `false` to disable Client API calls (useful for dev/test). |
 
