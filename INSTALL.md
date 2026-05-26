@@ -292,9 +292,12 @@ server {
     ssl_certificate     /etc/letsencrypt/live/policy.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/policy.example.com/privkey.pem;
 
-    # Reasonable defaults
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_prefer_server_ciphers off;
+    # Do NOT add `ssl_protocols` or `ssl_prefer_server_ciphers` here.
+    # After step 9b, certbot adds `include /etc/letsencrypt/options-ssl-nginx.conf;`
+    # which already sets both. Declaring them again makes `nginx -t` fail with
+    # `"ssl_prefer_server_ciphers" directive is duplicate`. If you need to
+    # override TLS settings, edit `/etc/letsencrypt/options-ssl-nginx.conf`
+    # (or remove the include and set them here instead — pick one place).
     add_header Strict-Transport-Security "max-age=31536000" always;
 
     client_max_body_size 1m;
