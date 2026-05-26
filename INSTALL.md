@@ -22,7 +22,7 @@ You will need to know:
 |---|---|---|
 | **Hostname / IP of this Ubuntu server** | Where Pexip will send policy requests. | `policy.example.com` or `10.0.0.50` |
 | **Pexip Conferencing Node hostname** | Any one of your Pexip nodes. The Client API is reachable on every node. | `conf01.example.com` |
-| **Default classification level** | Used when a caller's domain is not in the table yet. | `0` |
+| **Default classification level** | Used when a caller's domain is not in the table yet. Must be an integer in the range `1`–`5`. | `1` |
 
 Write these down — you'll paste them into a config file in step 5.
 
@@ -116,21 +116,14 @@ sudo -u pexippolicy /opt/pexip-policy/venv/bin/pip install \
 Quick sanity check — the app should import without errors:
 
 ```bash
-sudo -u pexippolicy ENABLE_CLIENT_API=false \
-     POLICY_DB_PATH=/tmp/policy-test.db \
-     /opt/pexip-policy/venv/bin/python -c "from app import create_app; create_app(); print('OK')" \
-     -- chdir=/opt/pexip-policy/app
-```
-
-If you see `OK`, you're good. (The `-- chdir=...` trick isn't needed
-for `python -c`; if the command above errors with "No module named
-app", run it from inside the app directory:)
-
-```bash
 cd /opt/pexip-policy/app
-sudo -u pexippolicy ENABLE_CLIENT_API=false POLICY_DB_PATH=/tmp/policy-test.db \
-     /opt/pexip-policy/venv/bin/python -c "from app import create_app; create_app(); print('OK')"
+sudo -u pexippolicy /opt/pexip-policy/venv/bin/python \
+     -c "from app import create_app; create_app(); print('OK')"
 ```
+
+If you see `OK`, you're good. (If you see `No module named app`,
+double-check that you ran the command from inside
+`/opt/pexip-policy/app`.)
 
 ---
 
@@ -146,7 +139,10 @@ sudo tee /etc/pexip-policy.env > /dev/null <<'EOF'
 POLICY_DB_PATH=/var/lib/pexip-policy/policy.db
 
 # --- Default classification when caller's domain is not configured ---
-DEFAULT_CLASSIFICATION_LEVEL=0
+# Must be an integer in the range 1..5 (1 = lowest / most permissive,
+# 5 = highest / most restrictive). Defaults to 1 so unknown callers
+# always pull the meeting down to the most permissive level.
+DEFAULT_CLASSIFICATION_LEVEL=1
 
 # --- Pexip Client API target ---
 # Hostname of any one of your Pexip Conferencing Nodes.
@@ -425,8 +421,17 @@ In the Pexip Management Node admin UI:
    **Policy profile** to `Domain classification`, save, and apply.
 
 Make sure the **Classification levels** scheme on Pexip already defines
-the integer levels you intend to map domains to (`0`, `1`, `2`, …) —
-otherwise `set_classification_level` will be rejected by the Client API.
+the integer levels `1`–`5` that this policy server uses — otherwise
+`set_classification_level` will be rejected by the Client API.
+
+> **How the meeting's level evolves.** The classification stored at
+> meeting creation is determined by the first caller's domain. As
+> additional participants join, the policy server re-evaluates the
+> meeting's classification on each `participant/properties` callback
+> and sets it to the **lowest** level across every joined participant's
+> domain — so admitting a less-trusted party declassifies the meeting
+> to their level. A more-trusted participant joining never silently
+> raises the classification.
 
 ---
 
@@ -529,16 +534,6 @@ sudo systemctl start   pexip-policy
 | Elapsed timer never appears | Same as above — the Client API call failed | Look for `set_clock (elapsed) failed` in `journalctl -u pexip-policy`. |
 | `Policy Server` participant stays in the roster | A token/refresh edge case. Ending the meeting cleans it up. | Investigate by raising the log level (set `LOG_LEVEL=DEBUG` in `/etc/pexip-policy.env`, then `sudo systemctl restart pexip-policy`). |
 | `PEXIP_VERIFY_TLS` warnings about self-signed certs | Lab Pexip nodes often use self-signed certs | Set `PEXIP_VERIFY_TLS=false` in `/etc/pexip-policy.env` for lab use only — never in production. |
-
-### Re-run the unit tests on the server (optional)
-
-```bash
-sudo -u pexippolicy /opt/pexip-policy/venv/bin/pip install pytest
-cd /opt/pexip-policy/app
-sudo -u pexippolicy /opt/pexip-policy/venv/bin/pytest -q
-```
-
-All ten tests should pass.
 
 ---
 
