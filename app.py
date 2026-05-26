@@ -222,9 +222,6 @@ def create_app(client_api: Optional[PexipClientAPI] = None) -> Flask:
             params.get("service_name") or params.get("local_alias")
         )
 
-        if local_alias:
-            _maybe_apply_client_api_actions(app, local_alias)
-
         # Always elevate the Policy Server bot to host (chair) so it can
         # call ``set_classification_level`` regardless of whether the
         # meeting has a host PIN, allows guests, or is locked. Detected
@@ -234,7 +231,8 @@ def create_app(client_api: Optional[PexipClientAPI] = None) -> Flask:
         # participants that have no SIP/H.323 URI). This is the
         # canonical pattern documented in the ``pexip-policy-server``
         # skill (SS2 Role Assignment Ladder, gotcha #12) and must be
-        # checked **before** any other role logic.
+        # checked **before** any other role logic — and before we treat
+        # the bot itself as a domain-carrying participant.
         if _is_policy_server_participant(params):
             return jsonify(
                 {
@@ -243,6 +241,17 @@ def create_app(client_api: Optional[PexipClientAPI] = None) -> Flask:
                     "result": {"role": "chair", "bypass_lock": True},
                 }
             )
+
+        if local_alias:
+            # Recompute the meeting's effective classification across all
+            # joined participants: the lowest level among every joining
+            # caller's domain. A later participant from a less-trusted
+            # domain therefore drops the meeting down to their level
+            # (it never silently raises a meeting's classification).
+            _maybe_lower_classification_for_participant(
+                app, local_alias, params.get("remote_alias", "")
+            )
+            _maybe_apply_client_api_actions(app, local_alias)
 
         # Empty result tells Pexip "use defaults" — we deliberately do
         # not override roles for real participants here.
@@ -280,8 +289,22 @@ def create_app(client_api: Optional[PexipClientAPI] = None) -> Flask:
             return jsonify({"error": "classification_level must be an integer"}), 400
         if not domain:
             return jsonify({"error": "domain is required"}), 400
-        if level < 0:
-            return jsonify({"error": "classification_level must be >= 0"}), 400
+        if (
+            level < storage.MIN_CLASSIFICATION_LEVEL
+            or level > storage.MAX_CLASSIFICATION_LEVEL
+        ):
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "classification_level must be between "
+                            f"{storage.MIN_CLASSIFICATION_LEVEL} and "
+                            f"{storage.MAX_CLASSIFICATION_LEVEL}"
+                        )
+                    }
+                ),
+                400,
+            )
         storage.upsert_domain(settings.database_path, domain, level, label)
         return (
             jsonify(
@@ -307,6 +330,77 @@ def create_app(client_api: Optional[PexipClientAPI] = None) -> Flask:
 # ---------------------------------------------------------------------------
 # Client API trigger
 # ---------------------------------------------------------------------------
+
+
+def _maybe_lower_classification_for_participant(
+    app: Flask, conference_alias: str, remote_alias: str
+) -> None:
+    """Drop the meeting's classification if this participant's domain is lower.
+
+    The meeting's effective classification level is the **minimum** across
+    every joined participant's domain (so admitting a less-trusted party
+    declassifies the meeting to their level — never silently raises it).
+    Called from ``participant_properties`` on every join.
+
+    If the recomputed level is lower than what's currently stored for the
+    conference, this updates the stored level and — if the Policy Server
+    bot is already in the meeting and holds a live Client API token —
+    pushes the new level to Pexip via ``set_classification_level``. If
+    the bot hasn't joined yet, the lower level is stored and will be
+    applied as the initial level by ``_maybe_apply_client_api_actions``.
+    """
+    state = storage.get_conference_state(settings.database_path, conference_alias)
+    if state is None:
+        # service_configuration hasn't been called for this VMR yet.
+        return
+    current_level, _applied = state
+
+    caller_domain = _extract_caller_domain(remote_alias)
+    participant_level, _label = storage.lookup_classification(
+        settings.database_path,
+        caller_domain,
+        settings.default_classification_level,
+    )
+
+    if participant_level >= current_level:
+        return
+
+    storage.update_conference_level(
+        settings.database_path, conference_alias, participant_level
+    )
+    log.info(
+        "participant_properties alias=%s caller_domain=%s lowered meeting "
+        "classification from L%s to L%s",
+        conference_alias,
+        caller_domain,
+        current_level,
+        participant_level,
+    )
+
+    client_api: Optional[PexipClientAPI] = app.config.get("CLIENT_API")
+    if client_api is None:
+        return
+
+    # Push the new level to Pexip without blocking the policy response.
+    # If the bot hasn't joined yet, ``update_classification_level``
+    # returns ``False`` and the lower level (now in the DB) will be used
+    # as the initial level by the keep-alive thread instead.
+    def _push() -> None:
+        try:
+            client_api.update_classification_level(
+                conference_alias, participant_level
+            )
+        except Exception:  # noqa: BLE001 - never bubble into Flask thread
+            log.exception(
+                "Pushing updated classification failed for %s",
+                conference_alias,
+            )
+
+    threading.Thread(
+        target=_push,
+        name=f"pexip-clientapi-update-{conference_alias}",
+        daemon=True,
+    ).start()
 
 
 def _maybe_apply_client_api_actions(app: Flask, conference_alias: str) -> None:
@@ -339,8 +433,20 @@ def _maybe_apply_client_api_actions(app: Flask, conference_alias: str) -> None:
     storage.mark_conference_applied(settings.database_path, conference_alias)
 
     def _run() -> None:
+        # Re-read the latest stored level just before applying so that a
+        # lower-priority participant who joined between the trigger and
+        # this thread getting scheduled still gets their (lower)
+        # classification applied as the initial level.
+        latest = storage.get_conference_state(
+            settings.database_path, conference_alias
+        )
+        if latest is None:
+            return
+        latest_level, _ = latest
         try:
-            client_api.apply_classification_and_timer(conference_alias, level)
+            client_api.apply_classification_and_timer(
+                conference_alias, latest_level
+            )
         except Exception:  # noqa: BLE001 - never bubble into Flask thread
             log.exception("Client API actions failed for %s", conference_alias)
 

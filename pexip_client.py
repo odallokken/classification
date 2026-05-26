@@ -69,6 +69,14 @@ class PexipClientAPI:
         self.display_name = display_name
         self.verify_tls = verify_tls
         self.timeout = timeout
+        # Per-conference live token held by the keep-alive loop. Lets a
+        # later policy callback (e.g. a second participant whose domain
+        # lowers the meeting's classification) re-issue
+        # ``set_classification_level`` without spawning a second bot.
+        # Keyed by conference alias; value is the current token string or
+        # ``None`` once the keep-alive loop has released it.
+        self._tokens: dict[str, Optional[str]] = {}
+        self._tokens_lock = threading.Lock()
 
     # ------------------------------------------------------------------ utils
     def _base(self, conference_alias: str) -> str:
@@ -202,6 +210,8 @@ class PexipClientAPI:
             )
             return
 
+        with self._tokens_lock:
+            self._tokens[conference_alias] = token
         try:
             try:
                 self.set_classification_level(
@@ -222,7 +232,46 @@ class PexipClientAPI:
 
             self._keep_alive(conference_alias, token, expires, stop_event)
         finally:
+            with self._tokens_lock:
+                self._tokens.pop(conference_alias, None)
             self.release_token(conference_alias, token)
+
+    def update_classification_level(
+        self, conference_alias: str, level: int
+    ) -> bool:
+        """Re-apply the classification level for a meeting that is already running.
+
+        Called when a later participant's domain lowers the meeting's
+        effective classification (the minimum across all joined
+        participants). Re-uses the live Policy Server bot's token so we
+        don't spawn a second bot. Returns ``True`` if the update was
+        delivered, ``False`` if no live token is available (e.g. the bot
+        hasn't joined yet or has already left).
+        """
+        with self._tokens_lock:
+            token = self._tokens.get(conference_alias)
+        if not token:
+            log.info(
+                "No live Policy Server token for %s; cannot push updated "
+                "classification level %s yet",
+                conference_alias,
+                level,
+            )
+            return False
+        try:
+            self.set_classification_level(conference_alias, token, int(level))
+        except Exception as exc:  # noqa: BLE001 - never bubble into Flask
+            log.warning(
+                "update_classification_level (set_classification_level) failed "
+                "for %s: %s",
+                conference_alias,
+                exc,
+            )
+            return False
+        log.info(
+            "Updated classification level for %s to L%s", conference_alias, level
+        )
+        return True
 
     def _keep_alive(
         self,

@@ -36,7 +36,10 @@ class Settings:
     )
 
     # Default classification level when a caller's domain has no mapping.
-    default_classification_level: int = _env_int("DEFAULT_CLASSIFICATION_LEVEL", 0)
+    # Defaults to ``1`` — the lowest level in the 1..5 scheme — so unknown
+    # callers always pull the meeting down to the most permissive (least
+    # sensitive) classification rather than inheriting a higher one.
+    default_classification_level: int = _env_int("DEFAULT_CLASSIFICATION_LEVEL", 1)
 
     # Pexip Client API settings (required to apply classification + timer).
     # Note: host PINs are intentionally not configured here. PINs are

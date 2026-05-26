@@ -9,12 +9,20 @@
   <main>
     <h1>Domain → Classification Mapping</h1>
     <p class="muted">
-      Each row maps an incoming caller domain to a classification level.
+      Each row maps an incoming caller domain to a classification level
+      (<strong>1</strong> = lowest / most permissive,
+      <strong>5</strong> = highest / most restrictive).
       When a call arrives, the policy server inspects the caller's
       <code>remote_alias</code> (e.g. <code>sip:alice@example.com</code>),
       looks up the domain (<code>example.com</code>) here, and applies
       that classification level to the meeting via the Pexip Client API.
       An elapsed-time conference timer is added to every meeting.
+    </p>
+    <p class="muted">
+      When additional participants join, the meeting's classification is
+      re-evaluated and set to the <strong>lowest</strong> level across
+      every joined participant's domain, so admitting a less-trusted
+      party declassifies the meeting to their level.
     </p>
     <p class="muted">
       Unknown domains use the default level
@@ -55,8 +63,9 @@
         <input type="text" name="domain" placeholder="example.com" required>
       </label>
       <label>
-        Classification level
-        <input type="number" name="classification_level" min="0" value="0" required>
+        Classification level (1–5)
+        <input type="number" name="classification_level"
+               min="1" max="5" value="1" required>
       </label>
       <label>
         Label (optional)

@@ -75,14 +75,26 @@ def list_domains(db_path: str) -> List[Tuple[str, int, Optional[str]]]:
     return [(r["domain"], r["classification_level"], r["label"]) for r in rows]
 
 
+#: Inclusive bounds for an administrator-configurable classification level.
+#: The Pexip Infinity classification scheme this server is paired with
+#: defines five levels (1 = lowest / most permissive, 5 = highest /
+#: most restrictive). Keep this in sync with the UX (`templates/admin.html`)
+#: and the API validation in `app.upsert_domain_api`.
+MIN_CLASSIFICATION_LEVEL = 1
+MAX_CLASSIFICATION_LEVEL = 5
+
+
 def upsert_domain(
     db_path: str, domain: str, level: int, label: Optional[str] = None
 ) -> None:
     domain = domain.strip().lower()
     if not domain:
         raise ValueError("domain must not be empty")
-    if level < 0:
-        raise ValueError("classification_level must be >= 0")
+    if level < MIN_CLASSIFICATION_LEVEL or level > MAX_CLASSIFICATION_LEVEL:
+        raise ValueError(
+            f"classification_level must be between {MIN_CLASSIFICATION_LEVEL} "
+            f"and {MAX_CLASSIFICATION_LEVEL}"
+        )
     with _cursor(db_path) as conn:
         conn.execute(
             """
@@ -194,3 +206,21 @@ def get_conference_state(
     if row is None:
         return None
     return row["classification_level"], bool(row["applied"])
+
+
+def update_conference_level(
+    db_path: str, conference_alias: str, classification_level: int
+) -> bool:
+    """Update the stored effective classification level for a conference.
+
+    Returns ``True`` if a row was updated, ``False`` if the conference is
+    not (yet) tracked. Used when a later-joining participant lowers the
+    meeting's effective level (the minimum across all joined domains).
+    """
+    with _cursor(db_path) as conn:
+        cur = conn.execute(
+            "UPDATE conference_state SET classification_level = ? "
+            "WHERE conference_alias = ?",
+            (int(classification_level), conference_alias),
+        )
+        return cur.rowcount > 0
